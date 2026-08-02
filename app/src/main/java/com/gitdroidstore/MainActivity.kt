@@ -22,7 +22,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gitdroidstore.model.StoreApp
@@ -77,7 +76,7 @@ private enum class Tab { HOME, SETTINGS, LOGS }
     if (apps.isEmpty() && !loading) Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(Icons.Default.Android, null, Modifier.size(64.dp)); Spacer(Modifier.height(16.dp))
         Text("No hay aplicaciones", style = MaterialTheme.typography.headlineSmall)
-        Text("Configura un usuario de GitHub. Solo aparecerán repositorios cuya última Release contenga app.apk.", style = MaterialTheme.typography.bodyMedium)
+        Text("GitDroidStore descarga un único catalog.json público. El catálogo predeterminado es el de CctrGy.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp)); Button(onClick = refresh) { Text("Buscar aplicaciones") }
     } else LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items(apps, key = { "${it.owner}/${it.repo}" }) { app -> AppCard(app, install) }
@@ -148,14 +147,13 @@ private const val MAX_ICON_DIMENSION = 2048
 
 @Composable private fun Settings(vm: StoreViewModel) {
     var user by remember { mutableStateOf(vm.settings.githubUser) }
-    var token by remember { mutableStateOf(vm.settings.githubToken) }
     var auto by remember { mutableStateOf(vm.settings.autoCheck) }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Origen GitHub", style = MaterialTheme.typography.titleLarge)
-        OutlinedTextField(user, { user = it }, label = { Text("Usuario de GitHub") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(token, { token = it }, label = { Text("Token personal (opcional)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(user, { user = it }, label = { Text("Propietario del catálogo") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("Se descargará https://raw.githubusercontent.com/<usuario>/GitDroidStore/main/catalog.json. No necesita token.", style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) { Switch(auto, { auto = it }); Spacer(Modifier.width(10.dp)); Text("Comprobar actualizaciones automáticamente") }
-        Button(onClick = { vm.settings.githubUser = user; vm.settings.githubToken = token; vm.settings.autoCheck = auto; UpdateScheduler.schedule(vm.getApplication(), auto); vm.refresh() }, modifier = Modifier.fillMaxWidth()) { Text("Guardar y actualizar") }
+        Button(onClick = { vm.settings.githubUser = user; vm.settings.githubToken = ""; vm.settings.autoCheck = auto; UpdateScheduler.schedule(vm.getApplication(), auto); vm.refresh() }, modifier = Modifier.fillMaxWidth()) { Text("Guardar y actualizar") }
         HorizontalDivider(); Text("Seguridad", style = MaterialTheme.typography.titleMedium)
         Text("Las primeras instalaciones exigen certificateSha256 en version.json. Las actualizaciones deben conservar ese certificado.")
     }

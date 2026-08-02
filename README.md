@@ -1,6 +1,6 @@
 # GitDroidStore
 
-GitDroidStore es una mini-store Android que descubre aplicaciones publicadas por un usuario de GitHub, descarga sus APK desde GitHub Releases, verifica su integridad y firma digital y solicita su instalación mediante `PackageInstaller.Session`.
+GitDroidStore es una mini-store Android que descarga un único catálogo estático, obtiene los APK desde GitHub Releases, verifica su integridad y firma digital y solicita su instalación mediante `PackageInstaller.Session`.
 
 Repositorio oficial: [CctrGy/GitDroidStore](https://github.com/CctrGy/GitDroidStore). El maker configurado de forma predeterminada es `CctrGy`.
 
@@ -17,11 +17,42 @@ Para que GitDroidStore reconozca un repositorio como una aplicación instalable 
 7. El certificado real del APK debe coincidir con `certificateSha256`.
 8. Si se declaran `packageName` o `sha256`, también deben coincidir con el APK publicado.
 
-Los borradores y las prereleases no se consideran la última versión porque GitDroidStore consulta:
+Los borradores y las prereleases no se consideran la última versión porque el generador del catálogo consulta:
 
 ```text
 GET https://api.github.com/repos/<usuario>/<repositorio>/releases/latest
 ```
+
+## Catálogo estático y ahorro de solicitudes
+
+La aplicación Android no recorre repositorios ni consulta la API de GitHub. En cada actualización realiza una sola descarga pública:
+
+```text
+https://raw.githubusercontent.com/CctrGy/GitDroidStore/main/catalog.json
+```
+
+`catalog.json` reúne todas las aplicaciones reconocidas, sus versiones, iconos, hashes y enlaces `app.apk`. El propietario configurado en Ajustes permite usar también un fork compatible; por ejemplo, el propietario `otro-maker` apunta a:
+
+```text
+https://raw.githubusercontent.com/otro-maker/GitDroidStore/main/catalog.json
+```
+
+El archivo tiene el esquema `schemaVersion: 1`. Cada entrada incluye, entre otros campos, `owner`, `repo`, `displayName`, `description`, `packageName`, `versionName`, `versionCode`, `sha256`, `certificateSha256`, `apkUrl`, `iconUrl` y `remoteSha`. GitDroidStore valida que los APK pertenezcan a GitHub Releases y que los iconos procedan de `raw.githubusercontent.com` antes de utilizarlos.
+
+### Generación automática
+
+El workflow [`.github/workflows/update-catalog.yml`](.github/workflows/update-catalog.yml) ejecuta [`scripts/generate_catalog.py`](scripts/generate_catalog.py) con el `GITHUB_TOKEN` interno de GitHub Actions. Por tanto, las consultas de descubrimiento se hacen centralmente y los móviles nunca consumen el límite público de la API.
+
+El catálogo se regenera:
+
+- al publicar, editar o eliminar una Release de `GitDroidStore`;
+- cada seis horas, para descubrir Releases nuevas en el resto de repositorios de `CctrGy`;
+- manualmente desde la pestaña **Actions**;
+- al recibir un evento `repository_dispatch` de tipo `catalog-update`.
+
+El generador conserva `generatedAt` cuando las aplicaciones no han cambiado, por lo que la Action no crea commits vacíos. Para actualizar el catálogo inmediatamente después de publicar en otro repositorio, ejecuta manualmente la Action o envía `repository_dispatch`; de lo contrario, aparecerá en la siguiente comprobación programada.
+
+El catálogo debe permanecer público. Ni descargar `catalog.json` ni descargar un `app.apk` de una Release pública requiere token o acreditación.
 
 ## Estructura del repositorio
 
@@ -148,9 +179,110 @@ GitDroidStore utiliza como máximo los primeros 100 caracteres. Si el archivo fa
 
 ### `icon.png`
 
-Icono público de la aplicación. La opción recomendada es llamarlo exactamente `icon.png` y colocarlo en la raíz de la rama predeterminada. Se aceptan PNG, WebP, JPG o JPEG de hasta 2 MB y 2048×2048 píxeles.
+Es la imagen que GitDroidStore muestra en la tarjeta de la aplicación dentro de la pantalla **Inicio**. Este icono es independiente del asset `app.apk`: GitDroidStore no descarga el APK ni extrae automáticamente su launcher icon para construir el catálogo.
 
-Si falta, GitDroidStore busca automáticamente candidatos habituales dentro del repositorio, como `ic_launcher.png`, `icon.webp`, `app-icon.png`, `developer-icon-512.png` o imágenes cuyo nombre contenga `launcher` o `icon`. Si no encuentra una imagen válida, utiliza el icono Android genérico.
+#### Implementación recomendada
+
+Coloca una imagen cuadrada llamada exactamente `icon.png` en la raíz de la rama predeterminada:
+
+```text
+MiAplicacion/
+├── icon.png
+├── version.json
+├── appname.txt
+└── resto del proyecto
+```
+
+Configuración recomendada:
+
+- Nombre exacto: `icon.png`.
+- Ubicación: raíz de la rama predeterminada, normalmente `main`.
+- Formato recomendado: PNG.
+- Proporción: cuadrada, `1:1`.
+- Resolución recomendada: `512×512` o `1024×1024` píxeles.
+- Resolución máxima admitida: `2048×2048` píxeles.
+- Tamaño máximo del archivo: 2 MB.
+- Mantén el símbolo principal centrado y con margen, porque la interfaz recorta la imagen con esquinas redondeadas.
+- El archivo debe ser público y descargable desde `raw.githubusercontent.com` mediante HTTPS.
+
+Ejemplo de URL que GitDroidStore obtiene automáticamente:
+
+```text
+https://raw.githubusercontent.com/<usuario>/<repositorio>/main/icon.png
+```
+
+No es necesario añadir la URL a `version.json`.
+
+#### Formatos admitidos
+
+GitDroidStore puede decodificar:
+
+- `.png`
+- `.webp`
+- `.jpg`
+- `.jpeg`
+
+No admite como icono de catálogo:
+
+- SVG.
+- XML de Android, incluidos adaptive icons como `ic_launcher.xml`.
+- ICO.
+- GIF animado.
+- Imágenes guardadas únicamente como assets de una GitHub Release.
+- URLs de servidores externos que no sean `raw.githubusercontent.com`.
+
+#### Búsqueda automática alternativa
+
+Si no existe `/icon.png`, el generador del catálogo inspecciona el árbol completo del repositorio y puntúa los candidatos por este orden:
+
+1. `ic_launcher.png` o `ic_launcher.webp`.
+2. `icon.png` o `icon.webp` en otra carpeta.
+3. Nombres que contengan `app-icon` o `developer-icon`.
+4. Nombres que contengan `launcher`.
+5. Otros nombres que contengan `icon`.
+
+Por ejemplo, estas ubicaciones pueden reconocerse automáticamente:
+
+```text
+app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+docs/play-store-assets/developer-icon-512.png
+assets/app-icon.webp
+```
+
+La búsqueda alternativa es una comodidad, no una garantía: si existen varias imágenes candidatas con la misma prioridad, GitDroidStore puede no elegir la deseada. Para obtener un resultado determinista utiliza siempre `/icon.png`.
+
+#### Presentación y seguridad
+
+- La tarjeta muestra la imagen a `56 dp` con recorte `ContentScale.Crop` y esquinas redondeadas.
+- Antes de decodificarla se comprueba el tamaño declarado y también el número real de bytes descargados.
+- Después se comprueba que ancho y alto estén entre 1 y 2048 píxeles.
+- Si la descarga falla, el formato no puede decodificarse o se excede algún límite, se muestra el icono Android genérico.
+- Para ver un icono recién añadido o sustituido, pulsa **Actualizar** en la pantalla Inicio.
+
+#### Relación con el icono launcher del APK
+
+El proyecto Android debe configurar además su propio launcher icon en `AndroidManifest.xml`, pero eso no sustituye a `icon.png` para GitDroidStore:
+
+```xml
+<application
+    android:icon="@mipmap/ic_launcher"
+    android:roundIcon="@mipmap/ic_launcher_round" />
+```
+
+Puedes exportar la misma imagen visual tanto a los recursos `mipmap-*` de Android como a `/icon.png`, pero cada ubicación cumple una función diferente:
+
+- `android:icon`: icono mostrado por el launcher del teléfono después de instalar la app.
+- `/icon.png`: icono mostrado por GitDroidStore antes de descargar o instalar el APK.
+
+Lista de comprobación:
+
+- [ ] Existe `/icon.png` en la rama predeterminada.
+- [ ] Es un PNG cuadrado y válido.
+- [ ] No supera 2 MB.
+- [ ] No supera 2048×2048 píxeles.
+- [ ] El contenido importante tiene margen alrededor.
+- [ ] La URL pública de GitHub responde correctamente.
+- [ ] Se ha pulsado **Actualizar** en GitDroidStore después de publicarlo.
 
 ## Crear una Release compatible
 
@@ -207,7 +339,7 @@ El APK temporal se elimina si cualquiera de estas comprobaciones falla.
 - El asset tiene otro nombre o todavía no está completamente subido.
 - La URL del asset no pertenece a GitHub Releases.
 - El SHA-256 de `version.json` contradice al digest proporcionado por GitHub.
-- Se alcanzó el límite de consultas de la API de GitHub; puede configurarse un token personal opcional.
+- El catálogo todavía no se ha regenerado después de publicar la Release.
 
 ## Motivos por los que una instalación se bloquea
 
@@ -242,4 +374,4 @@ Requisitos para compilar este proyecto:
 - Android SDK Build Tools 36.0.0.
 - Android 8.0 (API 26) como versión mínima del dispositivo.
 
-El token de GitHub es opcional y solo se utiliza para aumentar el límite de consultas de la API.
+La aplicación móvil no solicita ningún token de GitHub. La generación central utiliza únicamente el `GITHUB_TOKEN` efímero proporcionado por GitHub Actions.

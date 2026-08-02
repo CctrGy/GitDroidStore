@@ -23,9 +23,9 @@ class StoreRepository(
     suspend fun cachedApps() = withContext(Dispatchers.IO) { db.loadApps(settings.githubUser) }
 
     suspend fun refresh(): List<StoreApp> = withContext(Dispatchers.IO) {
-        require(settings.githubUser.isNotBlank()) { "Configura un usuario de GitHub" }
-        db.log("INFO", "Buscando repositorios de ${settings.githubUser}")
-        val discovered = github.discover(settings.githubUser, settings.githubToken).map { app ->
+        require(settings.githubUser.isNotBlank()) { "Configura el propietario del catálogo" }
+        db.log("INFO", "Descargando el catálogo estático de ${settings.githubUser}")
+        val discovered = github.discover(settings.githubUser, "").map { app ->
             val installed = app.packageName?.let(verifier::installed)
             app.copy(installedVersionCode = installed?.first, installedCertificateSha256 = installed?.second)
         }
@@ -38,7 +38,7 @@ class StoreRepository(
         val dir = File(context.cacheDir, "apks").apply { mkdirs() }
         val target = File(dir, app.repo.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".apk")
         db.log("INFO", "Descargando ${app.displayName}")
-        github.download(app.apkUrl, settings.githubToken, target)
+        github.download(app.apkUrl, "", target)
         try {
             val identity = verifier.inspect(target)
             require(app.packageName == null || identity.packageName == app.packageName) { "El packageName no coincide con version.json" }

@@ -1,81 +1,47 @@
 package com.gitdroidstore.data
 
-import com.gitdroidstore.model.StoreApp
-import com.gitdroidstore.model.VersionMetadata
 import com.gitdroidstore.StoreConfig
-import org.json.JSONArray
+import com.gitdroidstore.model.StoreApp
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 
 class GitHubClient {
-    fun discover(owner: String, token: String): List<StoreApp> {
-        require(owner.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})"))) { "Usuario de GitHub no válido" }
-        val repos = mutableListOf<JSONObject>()
-        var page = 1
-        while (true) {
-            val batch = JSONArray(get("https://api.github.com/users/$owner/repos?per_page=100&page=$page", token))
-            repeat(batch.length()) { repos += batch.getJSONObject(it) }
-            if (batch.length() < 100) break
-            page++
+    /** Downloads one public static file. Repository discovery is performed by GitHub Actions. */
+    fun discover(catalogOwner: String, @Suppress("UNUSED_PARAMETER") token: String): List<StoreApp> {
+        require(catalogOwner.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})"))) {
+            "Usuario de GitHub no válido"
         }
-        return repos.mapNotNull { repo -> inspectRepo(owner, repo, token) }
+        val catalog = JSONObject(get(StoreConfig.catalogUrl(catalogOwner), ""))
+        require(catalog.optInt("schemaVersion") == 1) { "Versión de catálogo no compatible" }
+        val apps = catalog.optJSONArray("apps") ?: error("El catálogo no contiene apps")
+        return (0 until apps.length()).map { parseApp(apps.getJSONObject(it)) }
     }
 
-    private fun inspectRepo(owner: String, repo: JSONObject, token: String): StoreApp? {
-        val name = repo.getString("name")
-        val branch = repo.optString("default_branch", "main")
-        val release = try {
-            JSONObject(get("https://api.github.com/repos/$owner/$name/releases/latest", token))
-        } catch (e: GitHubHttpException) {
-            if (e.statusCode == 404) return null else throw e
-        }
-        val assets = release.optJSONArray("assets") ?: return null
-        val apk = (0 until assets.length())
-            .map { assets.getJSONObject(it) }
-            .firstOrNull { it.optString("name") == "app.apk" && it.optString("state") == "uploaded" }
-            ?: return null
-        val apkUrl = apk.optString("browser_download_url")
-            .takeIf { isReleaseDownloadUrl(it, owner, name) }
-            ?: return null
-        val contents = try {
-            JSONArray(get("https://api.github.com/repos/$owner/$name/contents/?ref=${encode(branch)}", token))
-        } catch (e: GitHubHttpException) {
-            if (e.statusCode == 404) JSONArray() else throw e
-        }
-        val files = (0 until contents.length()).associate { index ->
-            val item = contents.getJSONObject(index)
-            item.getString("name") to item
-        }
-        val metadata = files["version.json"]?.optString("download_url")
-            ?.takeIf { it.startsWith("https://raw.githubusercontent.com/") }
-            ?.let { runCatching { parseVersion(get(it, token)) }.getOrNull() } ?: VersionMetadata()
-        val friendlyName = files["appname.txt"]?.optString("download_url")
-            ?.takeIf { it.startsWith("https://raw.githubusercontent.com/") }
-            ?.let { runCatching { get(it, token).trim().take(100) }.getOrNull() }
-            .orEmpty().ifBlank { name }
-        val isOfficialStore = owner.equals(StoreConfig.OFFICIAL_GITHUB_OWNER, true) &&
-            name.equals(StoreConfig.OFFICIAL_REPOSITORY, true)
-        val releaseTag = release.optString("tag_name").trim()
-        val releaseDigest = apk.optString("digest")
-            .takeIf { it.startsWith("sha256:", ignoreCase = true) }
-            ?.substringAfter(':')?.normalizeHash()
-        val metadataDigest = metadata.sha256?.normalizeHash()
-        if (releaseDigest != null && metadataDigest != null && releaseDigest != metadataDigest) return null
-        val remoteIdentity = releaseDigest
-            ?: "${release.optLong("id")}:${apk.optLong("id")}:${apk.optString("updated_at")}:${apk.optLong("size")}"
+    private fun parseApp(value: JSONObject): StoreApp {
+        val owner = value.getString("owner")
+        val repo = value.getString("repo")
+        require(owner.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})"))) { "Propietario no válido" }
+        require(repo.matches(Regex("[A-Za-z0-9._-]+"))) { "Repositorio no válido" }
+        val apkUrl = value.getString("apkUrl")
+        require(isReleaseDownloadUrl(apkUrl, owner, repo)) { "Enlace APK no válido para $owner/$repo" }
+        val iconUrl = value.optString("iconUrl").ifBlank { null }
+        require(iconUrl == null || isRawGitHubUrl(iconUrl, owner, repo)) { "Enlace de icono no válido para $owner/$repo" }
         return StoreApp(
-            owner = owner, repo = name, displayName = friendlyName,
-            description = repo.optString("description").takeUnless { it == "null" }.orEmpty(),
-            defaultBranch = branch, apkUrl = apkUrl,
-            iconUrl = files["icon.png"]?.optString("download_url")?.takeIf { it.isNotBlank() }
-                ?: findRepositoryIcon(owner, name, branch, token),
-            versionName = metadata.versionName ?: releaseTag.removePrefix("v").ifBlank { null }, versionCode = metadata.versionCode,
-            expectedSha256 = releaseDigest ?: metadataDigest,
-            expectedCertificateSha256 = metadata.certificateSha256?.normalizeHash(),
-            packageName = metadata.packageName ?: if (isOfficialStore) StoreConfig.APPLICATION_ID else null,
-            remoteSha = remoteIdentity
+            owner = owner,
+            repo = repo,
+            displayName = value.optString("displayName").ifBlank { repo }.take(100),
+            description = value.optString("description").takeUnless { it == "null" }.orEmpty(),
+            defaultBranch = value.optString("defaultBranch", "main"),
+            apkUrl = apkUrl,
+            iconUrl = iconUrl,
+            versionName = value.optString("versionName").ifBlank { null },
+            versionCode = value.optLongOrNull("versionCode"),
+            expectedSha256 = value.optString("sha256").ifBlank { null }?.normalizeHash(),
+            expectedCertificateSha256 = value.optString("certificateSha256").ifBlank { null }?.normalizeHash(),
+            packageName = value.optString("packageName").ifBlank { null },
+            remoteSha = value.optString("remoteSha").ifBlank { value.getString("apkUrl") }
         )
     }
 
@@ -88,61 +54,35 @@ class GitHubClient {
     }
 
     private fun get(url: String, token: String): String = connection(url, token).useConnection { conn ->
-        if (conn.responseCode !in 200..299) throw GitHubHttpException(conn.responseCode, "GitHub respondió ${conn.responseCode}: ${conn.errorStream?.bufferedReader()?.readText().orEmpty()}")
+        if (conn.responseCode !in 200..299) throw IOException("GitHub respondió ${conn.responseCode}")
         conn.inputStream.bufferedReader().use { it.readText() }
     }
 
     private fun connection(url: String, token: String) = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15_000; readTimeout = 30_000
-        setRequestProperty("Accept", "application/vnd.github+json")
-        setRequestProperty("X-GitHub-Api-Version", "2026-03-10")
+        connectTimeout = 15_000
+        readTimeout = 30_000
+        setRequestProperty("Accept", "application/json")
         setRequestProperty("User-Agent", "GitDroidStore/1")
         if (token.isNotBlank()) setRequestProperty("Authorization", "Bearer $token")
     }
 
-    private inline fun <T> HttpURLConnection.useConnection(block: (HttpURLConnection) -> T): T = try { block(this) } finally { disconnect() }
+    private inline fun <T> HttpURLConnection.useConnection(block: (HttpURLConnection) -> T): T =
+        try { block(this) } finally { disconnect() }
+
     private fun isReleaseDownloadUrl(url: String, owner: String, repo: String): Boolean = runCatching {
         val uri = URI(url)
         uri.scheme.equals("https", true) && uri.host.equals("github.com", true) &&
-            uri.path.startsWith("/$owner/$repo/releases/download/", true)
+            uri.path.startsWith("/$owner/$repo/releases/download/", true) && uri.path.endsWith("/app.apk", true)
     }.getOrDefault(false)
-    private fun findRepositoryIcon(owner: String, repo: String, branch: String, token: String): String? = runCatching {
-        val tree = JSONObject(get("https://api.github.com/repos/$owner/$repo/git/trees/${encode(branch)}?recursive=1", token))
-            .optJSONArray("tree") ?: return null
-        val candidate = (0 until tree.length()).map { tree.getJSONObject(it) }
-            .filter { item ->
-                item.optString("type") == "blob" && item.optLong("size") in 1..MAX_ICON_BYTES &&
-                    item.optString("path").substringAfterLast('.').lowercase() in SUPPORTED_ICON_EXTENSIONS
-            }
-            .maxByOrNull { iconScore(it.optString("path")) }
-            ?.takeIf { iconScore(it.optString("path")) > 0 }
-            ?.optString("path") ?: return null
-        "https://raw.githubusercontent.com/$owner/$repo/${encodePath(branch)}/${encodePath(candidate)}"
-    }.getOrNull()
-    private fun iconScore(path: String): Int {
-        val normalized = path.lowercase()
-        val filename = normalized.substringAfterLast('/')
-        return when {
-            filename == "ic_launcher.png" || filename == "ic_launcher.webp" -> 100
-            filename == "icon.png" || filename == "icon.webp" -> 95
-            "app-icon" in filename || "developer-icon" in filename -> 90
-            "launcher" in filename -> 80
-            "icon" in filename -> 70
-            else -> 0
-        }
-    }
-    private fun encodePath(value: String) = value.split('/').joinToString("/") { encode(it).replace("+", "%20") }
-    private fun encode(value: String) = java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
-    private fun parseVersion(raw: String): VersionMetadata = JSONObject(raw).let {
-        VersionMetadata(it.optString("versionName").ifBlank { null }, if (it.has("versionCode")) it.optLong("versionCode") else null,
-            it.optString("sha256").ifBlank { null }, it.optString("certificateSha256").ifBlank { null }, it.optString("packageName").ifBlank { null })
-    }
+
+    private fun isRawGitHubUrl(url: String, owner: String, repo: String): Boolean = runCatching {
+        val uri = URI(url)
+        uri.scheme.equals("https", true) && uri.host.equals("raw.githubusercontent.com", true) &&
+            uri.path.startsWith("/$owner/$repo/", true)
+    }.getOrDefault(false)
+
+    private fun JSONObject.optLongOrNull(name: String): Long? =
+        if (has(name) && !isNull(name)) optLong(name) else null
+
     private fun String.normalizeHash() = replace(":", "").lowercase()
-
-    companion object {
-        private const val MAX_ICON_BYTES = 2L * 1024 * 1024
-        private val SUPPORTED_ICON_EXTENSIONS = setOf("png", "webp", "jpg", "jpeg")
-    }
 }
-
-private class GitHubHttpException(val statusCode: Int, message: String) : IOException(message)
