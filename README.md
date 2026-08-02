@@ -375,3 +375,7 @@ Requisitos para compilar este proyecto:
 - Android 8.0 (API 26) como versión mínima del dispositivo.
 
 La aplicación móvil no solicita ningún token de GitHub. La generación central utiliza únicamente el `GITHUB_TOKEN` efímero proporcionado por GitHub Actions.
+
+## Download
+
+[**Download GitDroidStore (.apk)**](https://github.com/CctrGy/GitDroidStore/releases/latest/download/app.apk)
