@@ -69,7 +69,8 @@ class GitHubClient {
             owner = owner, repo = name, displayName = friendlyName,
             description = repo.optString("description").takeUnless { it == "null" }.orEmpty(),
             defaultBranch = branch, apkUrl = apkUrl,
-            iconUrl = files["icon.png"]?.optString("download_url")?.takeIf { it.isNotBlank() },
+            iconUrl = files["icon.png"]?.optString("download_url")?.takeIf { it.isNotBlank() }
+                ?: findRepositoryIcon(owner, name, branch, token),
             versionName = metadata.versionName ?: releaseTag.removePrefix("v").ifBlank { null }, versionCode = metadata.versionCode,
             expectedSha256 = releaseDigest ?: metadataDigest,
             expectedCertificateSha256 = metadata.certificateSha256?.normalizeHash(),
@@ -105,12 +106,43 @@ class GitHubClient {
         uri.scheme.equals("https", true) && uri.host.equals("github.com", true) &&
             uri.path.startsWith("/$owner/$repo/releases/download/", true)
     }.getOrDefault(false)
+    private fun findRepositoryIcon(owner: String, repo: String, branch: String, token: String): String? = runCatching {
+        val tree = JSONObject(get("https://api.github.com/repos/$owner/$repo/git/trees/${encode(branch)}?recursive=1", token))
+            .optJSONArray("tree") ?: return null
+        val candidate = (0 until tree.length()).map { tree.getJSONObject(it) }
+            .filter { item ->
+                item.optString("type") == "blob" && item.optLong("size") in 1..MAX_ICON_BYTES &&
+                    item.optString("path").substringAfterLast('.').lowercase() in SUPPORTED_ICON_EXTENSIONS
+            }
+            .maxByOrNull { iconScore(it.optString("path")) }
+            ?.takeIf { iconScore(it.optString("path")) > 0 }
+            ?.optString("path") ?: return null
+        "https://raw.githubusercontent.com/$owner/$repo/${encodePath(branch)}/${encodePath(candidate)}"
+    }.getOrNull()
+    private fun iconScore(path: String): Int {
+        val normalized = path.lowercase()
+        val filename = normalized.substringAfterLast('/')
+        return when {
+            filename == "ic_launcher.png" || filename == "ic_launcher.webp" -> 100
+            filename == "icon.png" || filename == "icon.webp" -> 95
+            "app-icon" in filename || "developer-icon" in filename -> 90
+            "launcher" in filename -> 80
+            "icon" in filename -> 70
+            else -> 0
+        }
+    }
+    private fun encodePath(value: String) = value.split('/').joinToString("/") { encode(it).replace("+", "%20") }
     private fun encode(value: String) = java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
     private fun parseVersion(raw: String): VersionMetadata = JSONObject(raw).let {
         VersionMetadata(it.optString("versionName").ifBlank { null }, if (it.has("versionCode")) it.optLong("versionCode") else null,
             it.optString("sha256").ifBlank { null }, it.optString("certificateSha256").ifBlank { null }, it.optString("packageName").ifBlank { null })
     }
     private fun String.normalizeHash() = replace(":", "").lowercase()
+
+    companion object {
+        private const val MAX_ICON_BYTES = 2L * 1024 * 1024
+        private val SUPPORTED_ICON_EXTENSIONS = setOf("png", "webp", "jpg", "jpeg")
+    }
 }
 
 private class GitHubHttpException(val statusCode: Int, message: String) : IOException(message)

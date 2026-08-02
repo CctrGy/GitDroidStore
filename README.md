@@ -148,7 +148,9 @@ GitDroidStore utiliza como máximo los primeros 100 caracteres. Si el archivo fa
 
 ### `icon.png`
 
-Icono público de la aplicación. Debe llamarse exactamente `icon.png` y estar en la raíz de la rama predeterminada. Si se omite, GitDroidStore utiliza un icono genérico.
+Icono público de la aplicación. La opción recomendada es llamarlo exactamente `icon.png` y colocarlo en la raíz de la rama predeterminada. Se aceptan PNG, WebP, JPG o JPEG de hasta 2 MB y 2048×2048 píxeles.
+
+Si falta, GitDroidStore busca automáticamente candidatos habituales dentro del repositorio, como `ic_launcher.png`, `icon.webp`, `app-icon.png`, `developer-icon-512.png` o imágenes cuyo nombre contenga `launcher` o `icon`. Si no encuentra una imagen válida, utiliza el icono Android genérico.
 
 ## Crear una Release compatible
 
