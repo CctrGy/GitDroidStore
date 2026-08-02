@@ -1,26 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-02T16:18:50Z",
+  "generatedAt": "2026-08-02T16:24:16Z",
   "catalogOwner": "CctrGy",
   "apps": [
-    {
-      "owner": "CctrGy",
-      "repo": "GitDroidStore",
-      "displayName": "GitDroidStore",
-      "description": "Store to install .apk in mobile",
-      "defaultBranch": "main",
-      "packageName": "com.gitdroidstore",
-      "versionName": "1.1.0",
-      "versionCode": 2,
-      "sha256": "0dafbbf445cb38964bc47c506831c3fa607444b0f0ead36e5f0001e5ccb5f0c5",
-      "certificateSha256": "fa1312e6229d9a265168b698b91f3e23c4d808865ac863f9c097af4f832b030e",
-      "apkUrl": "https://github.com/CctrGy/GitDroidStore/releases/download/v1.1.0/app.apk",
-      "apkSize": 20421044,
-      "iconUrl": "https://raw.githubusercontent.com/CctrGy/GitDroidStore/main/icon.png",
-      "releaseTag": "v1.1.0",
-      "releasePublishedAt": "2026-08-02T15:56:26Z",
-      "remoteSha": "0dafbbf445cb38964bc47c506831c3fa607444b0f0ead36e5f0001e5ccb5f0c5"
-    },
     {
       "owner": "CctrGy",
       "repo": "ShareToLocate",
