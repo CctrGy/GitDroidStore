@@ -379,3 +379,8 @@ La aplicación móvil no solicita ningún token de GitHub. La generación centra
 ## Download
 
 [**Download GitDroidStore (.apk)**](https://github.com/CctrGy/GitDroidStore/releases/latest/download/app.apk)
+
+## Apoya el proyecto
+
+Si GitDroidStore te resulta útil, puedes seguir y apoyar su desarrollo en
+[CctrGy Donations](https://cctrgy.github.io/donations.html).
